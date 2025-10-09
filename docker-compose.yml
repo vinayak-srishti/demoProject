@@ -1,0 +1,47 @@
+services:
+  gdg_backend:
+    build:
+      context: ./BackendDemo
+      dockerfile: Dockerfile
+    container_name: gdg_backend_prod
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - MONGO_URI=mongodb://mongo:27018/demoproject
+      - CORS_ORIGIN=${CORS_ORIGIN}
+    depends_on:
+      gdg_mongo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    networks:
+      - gdg_network
+
+  gdg_mongo:
+    image: mongo:latest
+    container_name: gdg_mongo_prod
+    restart: unless-stopped
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh demoproject --quiet | grep 1
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    networks:
+      - gdg_network
+
+volumes:
+  mongo_data:
+
+networks:
+  gdg_network:
+    driver: bridge
