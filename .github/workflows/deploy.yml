@@ -1,0 +1,146 @@
+name: Deploy GDG Project (Production)
+
+# This workflow runs when changes are pushed to the 'deploy' branch
+on:
+  push:
+    branches:
+      - deploy # Trigger branch updated as per your input
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    # Define environment variables used during the Docker build steps
+    env:
+      # Assuming your docker-compose file is named this in the BackendDemo directory
+      DOCKER_COMPOSE_FILE: docker-compose.yml 
+      # Base path for deployment on the server
+      SERVER_BASE_PATH: /var/www/gdd.srishticampus.com
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # --- 1. Frontend Deployment (Static Assets to Nginx Root) ---
+      
+      - name: Setup Frontend Server Directory
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          script: |
+            FRONTEND_PATH="${{ env.SERVER_BASE_PATH }}/html"
+            sudo mkdir -p $FRONTEND_PATH
+            sudo chown -R $USER:$USER ${{ env.SERVER_BASE_PATH }}
+            sudo chmod -R 755 ${{ env.SERVER_BASE_PATH }}
+            echo "Frontend directory $FRONTEND_PATH ready."
+
+      - name: Build Frontend Production Assets (Docker)
+        run: |
+          # 1. CORRECTED: Write API URL to VITE_BACKEND, matching the Canvas axiosInstance.js file
+          echo "VITE_BACKEND=${{ secrets.VITE_GDG_API_URL }}" > FrontendDemo/.env.production
+          
+          # 2. Build the frontend image using the Dockerfile.build in FrontendDemo
+          docker build -t gdg-frontend-builder -f FrontendDemo/Dockerfile.build ./FrontendDemo
+          
+          # 3. Extract the built 'dist' directory
+          docker create --name temp_gdg_frontend gdg-frontend-builder
+          docker cp temp_gdg_frontend:/app/dist ./dist_frontend
+          docker rm temp_gdg_frontend
+        # This creates a local directory called 'dist_frontend' with the compiled assets
+        
+      - name: Clean up and Copy Frontend Assets to Server
+        uses: appleboy/scp-action@v0.1.4
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          source: "dist_frontend/"
+          target: "${{ env.SERVER_BASE_PATH }}/html/"
+          strip_components: 1
+          overwrite: true
+          
+      # --- 2. Backend Deployment (Docker Compose) ---
+
+      - name: Setup Backend Server Directory
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          script: |
+            BACKEND_PATH="${{ env.SERVER_BASE_PATH }}/backend"
+            sudo mkdir -p $BACKEND_PATH/current
+            # Setup folders for data persistence (assuming your backend uses these paths)
+            sudo mkdir -p $BACKEND_PATH/uploads
+            sudo mkdir -p $BACKEND_PATH/backups
+            sudo chown -R $USER:$USER $BACKEND_PATH
+            sudo chmod -R 755 $BACKEND_PATH
+            echo "Backend directory $BACKEND_PATH ready."
+            
+            # Clean up the old code directory before copy
+            rm -rf $BACKEND_PATH/current/* || true
+
+      - name: Copy Backend Files and Docker Compose to Server
+        uses: appleboy/scp-action@v0.1.4
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          # Copy the entire BackendDemo directory contents to the server
+          source: "BackendDemo/"
+          target: "${{ env.SERVER_BASE_PATH }}/backend/current/"
+          strip_components: 1 # Remove the 'BackendDemo/' path component
+          overwrite: true
+
+      - name: Deploy with Docker Compose
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          script: |
+            BACKEND_DEPLOY_DIR="${{ env.SERVER_BASE_PATH }}/backend/current"
+            cd $BACKEND_DEPLOY_DIR
+            
+            # Create .env file for the running containers (using the new domain)
+            cat > .env <<EOF
+            MONGO_URI=mongodb://gdg_mongo:27018/demoproject
+            CORS_ORIGIN=https://gdd.srishticampus.com
+            NODE_ENV=production
+            # Add any other required backend environment variables here:
+            # JWT_SECRET=${{ secrets.GDG_JWT_SECRET }} 
+            EOF
+            
+            # Stop and remove existing containers (using the file name defined in env)
+            docker compose -f ${{ env.DOCKER_COMPOSE_FILE }} down || true
+            
+            # Build and start containers
+            if docker compose -f ${{ env.DOCKER_COMPOSE_FILE }} up -d --build; then
+              echo "Containers started successfully"
+              
+              # --- Simplified Health Check for GDG Backend ---
+              echo "Waiting for gdg_backend_prod to become healthy..."
+              for i in {1..24}; do # 24 checks * 5 seconds = 2 minutes timeout
+                STATUS=$(docker inspect --format='{{.State.Health.Status}}' gdg_backend_prod 2>/dev/null || echo "starting")
+                if [ "$STATUS" = "healthy" ]; then
+                  echo "gdg_backend_prod is healthy."
+                  break
+                fi
+                echo "Waiting... Status: $STATUS"
+                sleep 5
+              done
+              
+              if [ "$STATUS" != "healthy" ]; then
+                echo "::error::GDG Backend failed to become healthy within the timeout."
+                exit 1
+              fi
+
+              echo "Deployment verification:"
+              docker ps -a --filter "name=gdg_" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+              
+            else
+              echo "::error::Container startup failed."
+              exit 1
+            fi
