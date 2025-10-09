@@ -3,6 +3,8 @@ import img from "../../assets/images/image23.png";
 import './UserLogin.css';
 import axios from 'axios';
 import { Link,useNavigate } from 'react-router-dom';
+import axiosInstance from "../../constants/BaseUrl";
+
 function UserLogin() {
     
      const [formData, setFormData] = useState({
@@ -25,7 +27,7 @@ function UserLogin() {
     setLoading(true);
 
     try {
-      const response = await axios.post('http://localhost:3000/demo/login', formData);
+      const response = await axiosInstance.post('/login', formData);
       console.log('Login successful:', response.data);
 
       localStorage.setItem('user', JSON.stringify(response.data));

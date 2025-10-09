@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import "./UserReg.css";
 import img from "../../assets/images/clientReg.png";
 import { Link } from "react-router-dom";
-import { registerUser } from "../../services/UserService"; // 👈 import service
+import { registerUser } from "../../services/UserService"; 
 
 function UserReg() {
   const [formData, setFormData] = useState({
@@ -60,10 +60,10 @@ function UserReg() {
       const res = await registerUser({
         name: formData.name,
         email: formData.email,
-        contact: formData.phone,
+        phone: formData.phone,
         password: formData.password,
       });
-
+      
       setSuccessMessage(res.message || "Registration successful!");
       setFormData({
         name: "",
