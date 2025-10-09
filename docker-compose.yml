@@ -1,6 +1,8 @@
 services:
+  # --- Backend Service (Node.js/Express) ---
   gdg_backend:
     build:
+      # Context points to the directory containing the backend Dockerfile and source
       context: ./BackendDemo
       dockerfile: Dockerfile
     container_name: gdg_backend_prod
@@ -8,8 +10,10 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - MONGO_URI=mongodb://mongo:27018/demoproject
+      # MONGO_URI uses the service name 'gdg_mongo' for internal networking
+      - MONGO_URI=mongodb://gdg_mongo:27018/demoproject
       - CORS_ORIGIN=${CORS_ORIGIN}
+    # Ensure backend waits for the database to be reported as healthy
     depends_on:
       gdg_mongo:
         condition: service_healthy
@@ -22,15 +26,38 @@ services:
     networks:
       - gdg_network
 
+  # --- Frontend Build Service (Runs the React/Vite compilation) ---
+  # This service performs the build and saves the static files to the 'gdg_static' volume.
+  # Note: Since the Nginx server is removed, these files are built but not served via HTTP.
+  gdg_frontend_build:
+    container_name: gdg_frontend_build
+    build:
+      # Context points to the directory containing the React app and Dockerfile.build
+      context: ./FrontendDemo
+      dockerfile: Dockerfile.build
+    environment:
+      - NODE_ENV=production
+    volumes:
+      # IMPORTANT: Output the built static files to the named volume 'gdg_static'
+      - gdg_static:/app/dist 
+    networks:
+      - gdg_network
+    # This service is only for building; it exits once the build is complete.
+    command: true
+
+  # --- Database Service (MongoDB) ---
   gdg_mongo:
     image: mongo:latest
     container_name: gdg_mongo_prod
     restart: unless-stopped
     ports:
+      # Expose internal Mongo port 27017 to host port 27018 (as used in MONGO_URI)
       - "27018:27017"
     volumes:
+      # Persistent storage for MongoDB data
       - mongo_data:/data/db
     healthcheck:
+      # Standard health check for MongoDB
       test: echo 'db.runCommand("ping").ok' | mongosh demoproject --quiet | grep 1
       interval: 10s
       timeout: 5s
@@ -39,9 +66,14 @@ services:
     networks:
       - gdg_network
 
+# --- Volume Definitions ---
 volumes:
   mongo_data:
+    # Volume to persist MongoDB data
+  gdg_static:
+    # Volume to store built frontend static files
 
+# --- Network Definition ---
 networks:
   gdg_network:
     driver: bridge
