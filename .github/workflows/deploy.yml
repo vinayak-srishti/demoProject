@@ -12,8 +12,8 @@ jobs:
     
     # Define environment variables used during the Docker build steps
     env:
-      # Assuming your docker-compose file is named this in the repository root (./)
-      DOCKER_COMPOSE_FILE: docker-compose.yml 
+      # Renaming the compose file for deployment clarity to avoid conflict with root file
+      DOCKER_COMPOSE_FILE: docker-compose.prod.yml 
       # Base path for deployment on the server
       SERVER_BASE_PATH: /var/www/gdd.srishticampus.com
       BACKEND_BASE: /var/www/gdd.srishticampus.com/backend
@@ -58,12 +58,12 @@ jobs:
               echo "Code/Env Backup created: backups/backup_$TIMESTAMP.tar.gz"
               
               # Backup MongoDB (gdd_mongo container, 'demoproject' db)
-              if docker ps --format '{{.Names}}' | grep -q gdd_mongo; then
+              if docker ps --format '{{.Names}}' | grep -q gdd_mongo_prod; then # Using gdd_mongo_prod container name
                 echo "Creating MongoDB backup..."
-                docker exec gdd_mongo mongodump --archive --gzip --db demoproject > mongo_backups/mongo_backup_$TIMESTAMP.gz
+                docker exec gdd_mongo_prod mongodump --archive --gzip --db demoproject > mongo_backups/mongo_backup_$TIMESTAMP.gz
                 echo "MongoDB backup created: mongo_backups/mongo_backup_$TIMESTAMP.gz"
               else
-                echo "gdd_mongo container not running, skipping database backup."
+                echo "gdd_mongo_prod container not running, skipping database backup."
               fi
             else
               echo "No existing deployment found, skipping backup."
@@ -104,8 +104,6 @@ jobs:
           username: ${{ secrets.SERVER_USERNAME }}
           password: ${{ secrets.SERVER_PASSWORD }}
           # Copy ONLY the contents of the BackendDemo folder.
-          # This assumes the correct, production-ready docker-compose.yml 
-          # is located inside BackendDemo/.
           source: "BackendDemo/"
           target: "${{ env.BACKEND_CURRENT }}/"
           overwrite: true
@@ -122,6 +120,10 @@ jobs:
             
             cd $DEPLOY_DIR
             
+            # ** NEW: Rename the copied docker-compose.yml to the expected production name **
+            # This ensures we use the correct file from BackendDemo/ and not a lingering root file.
+            mv docker-compose.yml ${{ env.DOCKER_COMPOSE_FILE }} || true
+            
             # Create .env file with secrets
             cat > .env <<EOF
             MONGO_URI=mongodb://gdd_mongo:27018/demoproject
@@ -131,7 +133,7 @@ jobs:
             EOF
             chmod 600 .env
             
-            # Stop and remove existing containers
+            # Stop and remove existing containers, using the new production file name
             docker compose -f ${{ env.DOCKER_COMPOSE_FILE }} down || true
             
             # Build and start containers
@@ -154,7 +156,7 @@ jobs:
                 
                 # --- ROLLBACK PROCEDURE ---
                 cd $BACKEND_BASE_DIR
-                # Bring down failed containers
+                # Bring down failed containers (using the full path to the new prod file name)
                 docker compose -f current/${{ env.DOCKER_COMPOSE_FILE }} down || true
                 
                 LATEST_CODE_BACKUP=$(ls -t backups/ | grep -E '^backup_.*\.tar\.gz$' | head -1)
@@ -172,7 +174,7 @@ jobs:
                     docker compose -f ${{ env.DOCKER_COMPOSE_FILE }} up -d gdd_mongo
                     sleep 10 # Give mongo time to start
                     # Restore data to 'demoproject' database
-                    docker exec -i gdd_mongo mongorestore --archive --gzip --drop --db demoproject < $BACKEND_BASE_DIR/mongo_backups/$LATEST_MONGO_BACKUP
+                    docker exec -i gdd_mongo_prod mongorestore --archive --gzip --drop --db demoproject < $BACKEND_BASE_DIR/mongo_backups/$LATEST_MONGO_BACKUP
                     echo "MongoDB restore complete."
                   fi
                   
