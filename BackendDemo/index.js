@@ -1,11 +1,8 @@
-const express = require('express');
-const cors = require('cors');
-require('./config/database.js'); 
-const router = require('./router.js');
-const dotenv = require('dotenv');
-
-// Load environment variables from .env file
-dotenv.config();
+import express from 'express';
+import cors from 'cors';
+import 'dotenv/config'; 
+import './config/database.js'; 
+import router from './router.js'; 
 
 const app = express();
 
