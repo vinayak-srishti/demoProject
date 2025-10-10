@@ -38,8 +38,7 @@ services:
       # Persistent storage for MongoDB data
       - mongo_data:/data/db
     healthcheck:
-      # Standard health check for MongoDB
-      test: echo 'db.runCommand("ping").ok' | mongosh demoproject --quiet | grep 1
+      test: echo 'db.runCommand("ping").ok' | mongosh --quiet | grep 1
       interval: 10s
       timeout: 5s
       retries: 6
