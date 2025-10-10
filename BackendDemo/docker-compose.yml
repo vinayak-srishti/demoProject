@@ -20,12 +20,6 @@ services:
     networks:
       - gdd_network
 
-# NOTE: Removed Database Service (mongo) block entirely
-
-# --- Volume Definitions ---
-volumes:
-  # NOTE: Removed mongo_data volume as we no longer manage the DB
-
 # --- Network Definition ---
 networks:
   gdd_network:
