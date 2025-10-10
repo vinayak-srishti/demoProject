@@ -10,13 +10,16 @@ services:
       - "3000:3000"
     # Uses the .env file created by the deployment script
     env_file: .env 
+    # FIX: Explicitly map host-gateway for robust connection to host DB
+    extra_hosts: 
+      - "host.docker.internal:host-gateway"
     # NOTE: Removed depends_on block as we are connecting externally
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/"]
       interval: 10s
       timeout: 5s
       retries: 6
-      start_period: 30s
+      start_period: 60s # FIX: Increased start period to allow more time for external DB connection
     networks:
       - gdd_network
 

@@ -123,7 +123,7 @@ jobs:
             
             # Create .env file with secrets
             cat > .env <<EOF
-            # FIX: MONGO_URI now points to the host's external service at 27017
+            # FIX: MONGO_URI now points to the host's external service at 27017, using correct syntax
             MONGO_URI=mongodb://host.docker.internal:27017/demoproject
             CORS_ORIGIN=http://gdd.srishticampus.com
             NODE_ENV=production
@@ -132,7 +132,6 @@ jobs:
             chmod 600 .env
             
             # ** FIX: Forcefully remove existing containers by their known names to resolve Conflict error **
-            # NOTE: Removed mongo_prod from cleanup
             docker rm -f gdd_backend_prod 2>/dev/null || true
             
             # Stop and remove existing containers, using the new production file name
@@ -141,7 +140,6 @@ jobs:
             # Build and start containers
             if docker compose -f ${{ env.DOCKER_COMPOSE_FILE }} up -d --build; then
               
-              # NOTE: Removed MongoDB startup wait, proceeding directly to backend health check
               echo "Starting GDD Backend and waiting for health check..."
 
               # --- Backend Health Check ---
@@ -161,9 +159,13 @@ jobs:
                 echo "::error::GDD Backend failed to become healthy within the timeout. Initiating rollback."
                 
                 # --- ROLLBACK PROCEDURE (Code/Env Only) ---
-                cd $BACKEND_BASE_DIR # Change to the base directory for backups
-                # Bring down failed containers 
-                docker compose -f current/${{ env.DOCKER_COMPOSE_FILE }} down || true 
+                
+                # FIX: Run down command from the deployment directory
+                cd $DEPLOY_DIR
+                docker compose -f ${{ env.DOCKER_COMPOSE_FILE }} down || true 
+                
+                # Change to base directory for backups and file operations
+                cd $BACKEND_BASE_DIR 
                 
                 LATEST_CODE_BACKUP=$(ls -t backups/ | grep -E '^backup_.*\.tar\.gz$' | head -1)
                 
@@ -177,7 +179,8 @@ jobs:
                   echo "Skipping MongoDB restore as the database is external."
                   
                   # Restart the full service using the restored code/env
-                  cd $DEPLOY_DIR # Change back to the current directory for docker-compose file
+                  # FIX: Change back to the correct deployment directory before up
+                  cd $DEPLOY_DIR 
                   docker compose -f ${{ env.DOCKER_COMPOSE_FILE }} up -d --build
                   
                   # Final check for rollback success
@@ -201,8 +204,6 @@ jobs:
                 cd $BACKEND_BASE_DIR/backups
                 ls -t | tail -n +6 | xargs rm -f -- 2>/dev/null || true
                 echo "Cleaned up old code backups (keeping 5 newest)."
-                
-                # NOTE: Removed Mongo backup cleanup
                 
                 # Final verification output
                 cd $DEPLOY_DIR # Change to the current directory for verification output
