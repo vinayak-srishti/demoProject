@@ -37,7 +37,7 @@ services:
     volumes:
       # Persistent storage for MongoDB data
       - mongo_data:/data/db
-    command: ["/bin/bash", "-c", "rm -f /data/db/mongod.lock || true && exec mongod"]
+    command: ["/bin/bash", "-c", "rm -f /data/db/mongod.lock /data/db/WiredTiger.lock /data/db/WiredTiger.session /data/db/WiredTiger.turtle || true && exec mongod"]
     healthcheck:
       # FIX: Added "CMD" prefix to satisfy Docker Compose healthcheck syntax.
       test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.runCommand({ ping: 1 }).ok ? 0 : 1)"]
