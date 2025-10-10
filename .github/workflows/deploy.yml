@@ -48,7 +48,7 @@ jobs:
           docker create --name temp_gdd_frontend gdd-frontend-builder
           docker cp temp_gdd_frontend:/app/dist ./dist_frontend
           docker rm temp_gdd_frontend
-        
+          
       - name: Clean up and Copy Frontend Assets to Server
         uses: appleboy/scp-action@v0.1.4
         with:
@@ -93,7 +93,7 @@ jobs:
           target: "${{ env.SERVER_BASE_PATH }}/backend/current/"
           strip_components: 1 
           overwrite: true
-
+          
       - name: Deploy with Docker Compose
         uses: appleboy/ssh-action@v0.1.10
         with:
@@ -114,7 +114,6 @@ jobs:
             EOF
             
             # Stop and remove existing containers (using the file name defined in env)
-            # This line will now find the docker-compose.yml file:
             docker compose -f ${{ env.DOCKER_COMPOSE_FILE }} down || true
             
             # Build and start containers
@@ -135,6 +134,8 @@ jobs:
               
               if [ "$STATUS" != "healthy" ]; then
                 echo "::error::GDD Backend failed to become healthy within the timeout."
+                # Output logs for debugging before exiting
+                docker logs gdd_backend_prod
                 exit 1
               fi
 
