@@ -42,7 +42,7 @@ jobs:
           echo "VITE_BACKEND=${{ secrets.VITE_GDG_API_URL }}" > FrontendDemo/.env.production
           
           # 2. Build the frontend image using the Dockerfile in FrontendDemo
-          docker build -t gdg-frontend-builder -f FrontendDemo/Dockerfile.build ./FrontendDemo
+          docker build -t gdg-frontend-builder -f FrontendDemo/Dockerfile ./FrontendDemo
           
           # 3. Extract the built 'dist' directory
           docker create --name temp_gdg_frontend gdg-frontend-builder
