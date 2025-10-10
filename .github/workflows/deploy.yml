@@ -127,6 +127,7 @@ jobs:
             MONGO_URI=mongodb://host.docker.internal:27017/demoproject
             CORS_ORIGIN=http://gdd.srishticampus.com
             NODE_ENV=production
+            PORT=3000 # CRITICAL FIX: Explicitly set PORT for Node.js to ensure it listens on 3000 for the health check
             JWT_SECRET=${{ secrets.GDG_JWT_SECRET }}
             EOF
             chmod 600 .env
@@ -157,6 +158,11 @@ jobs:
               
               if [ "$STATUS" != "healthy" ]; then
                 echo "::error::GDD Backend failed to become healthy within the timeout. Initiating rollback."
+                
+                # --- NEW: Print Container Logs for Debugging ---
+                echo "--- GDD Backend Container Logs (gdd_backend_prod) ---"
+                docker logs gdd_backend_prod 2>/dev/null || echo "Could not retrieve container logs."
+                echo "-----------------------------------------------------"
                 
                 # --- ROLLBACK PROCEDURE (Code/Env Only) ---
                 
@@ -190,6 +196,9 @@ jobs:
                     exit 0 # Exit with success code after successful rollback
                   else
                     echo "::error::Rollback failed to restore service health. Manual intervention required."
+                    echo "--- Rollback Failure Debug Logs (gdd_backend_prod) ---"
+                    docker logs gdd_backend_prod 2>/dev/null || true
+                    echo "------------------------------------------------------"
                     exit 1 # Exit with failure code
                   fi
                 else

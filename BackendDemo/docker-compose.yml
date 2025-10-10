@@ -19,7 +19,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 6
-      start_period: 60s # FIX: Increased start period to allow more time for external DB connection
+      start_period: 60s # Keeps 60s to allow time for external DB connection
     networks:
       - gdd_network
 
