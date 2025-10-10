@@ -10,7 +10,7 @@ services:
       - "3000:3000"
     environment:
       # MONGO_URI uses the service name 'gdd_mongo' for internal networking
-      - MONGO_URI=mongodb://gdg_mongo:27018/demoproject
+      - MONGO_URI=mongodb://gdd_mongo:27018/demoproject
       - CORS_ORIGIN=${CORS_ORIGIN}
       # Other environment variables (like NODE_ENV) are provided by the .env file
     # Ensure backend waits for the database to be reported as healthy
@@ -38,7 +38,7 @@ services:
       # Persistent storage for MongoDB data
       - mongo_data:/data/db
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongosh --quiet | grep 1
+      test: ["mongosh", "--quiet", "--eval", "quit(db.runCommand({ ping: 1 }).ok ? 0 : 1)"]
       interval: 10s
       timeout: 5s
       retries: 6
