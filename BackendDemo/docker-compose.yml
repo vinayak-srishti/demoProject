@@ -1,0 +1,30 @@
+services:
+  # --- Backend Service (Node.js/Express) ---
+  gdd_backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gdd_backend_prod
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    # Uses the .env file created by the deployment script
+    env_file: .env 
+    # FIX: Explicitly map host-gateway for robust connection to host DB
+    extra_hosts: 
+      - "host.docker.internal:host-gateway"
+    # NOTE: Removed depends_on block as we are connecting externally
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 60s # Keeps 60s to allow time for external DB connection
+    networks:
+      - gdd_network
+
+# --- Network Definition ---
+networks:
+  gdd_network:
+    driver: bridge
+    name: current_gdd_network

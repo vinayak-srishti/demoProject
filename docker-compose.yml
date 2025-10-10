@@ -1,0 +1,79 @@
+services:
+  # --- Backend Service (Node.js/Express) ---
+  gdd_backend:
+    build:
+      # Context points to the directory containing the backend Dockerfile and source
+      context: ./BackendDemo
+      dockerfile: Dockerfile
+    container_name: gdd_backend_prod
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # MONGO_URI uses the service name 'gdd_mongo' for internal networking
+      - MONGO_URI=mongodb://gdd_mongo:27018/demoproject
+      - CORS_ORIGIN=${CORS_ORIGIN}
+    # Ensure backend waits for the database to be reported as healthy
+    depends_on:
+      gdd_mongo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    networks:
+      - gdd_network
+
+  # --- Frontend Build Service (Runs the React/Vite compilation) ---
+  # This service performs the build and saves the static files to the 'gdd_static' volume.
+  # Note: Since the Nginx server is removed, these files are built but not served via HTTP.
+  gdd_frontend_build:
+    container_name: gdd_frontend_build
+    build:
+      # Context points to the directory containing the React app and Dockerfile.build
+      context: ./FrontendDemo
+      dockerfile: Dockerfile.build
+    environment:
+      - NODE_ENV=production
+    volumes:
+      # IMPORTANT: Output the built static files to the named volume 'gdd_static'
+      - gdd_static:/app/dist 
+    networks:
+      - gdd_network
+    # This service is only for building; it exits once the build is complete.
+    command: true
+
+  # --- Database Service (MongoDB) ---
+  gdd_mongo:
+    image: mongo:latest
+    container_name: gdd_mongo_prod
+    restart: unless-stopped
+    ports:
+      # Expose internal Mongo port 27017 to host port 27018 (as used in MONGO_URI)
+      - "27018:27017"
+    volumes:
+      # Persistent storage for MongoDB data
+      - mongo_data:/data/db
+    healthcheck:
+      # Standard health check for MongoDB
+      test: echo 'db.runCommand("ping").ok' | mongosh demoproject --quiet | grep 1
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    networks:
+      - gdd_network
+
+# --- Volume Definitions ---
+volumes:
+  mongo_data:
+    # Volume to persist MongoDB data
+  gdd_static:
+    # Volume to store built frontend static files
+
+# --- Network Definition ---
+networks:
+  gdd_network:
+    driver: bridge

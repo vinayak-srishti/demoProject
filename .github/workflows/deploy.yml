@@ -1,0 +1,226 @@
+name: Deploy GDD Project (Production)
+
+# This workflow runs when changes are pushed to the 'deploy' branch
+on:
+  push:
+    branches:
+      - deploy # Trigger branch updated as per your input
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    # Define environment variables used during the Docker build steps
+    env:
+      # Renaming the compose file for deployment clarity to avoid conflict with root file
+      DOCKER_COMPOSE_FILE: docker-compose.prod.yml 
+      # Base path for deployment on the server
+      SERVER_BASE_PATH: /var/www/gdd.srishticampus.com
+      BACKEND_BASE: /var/www/gdd.srishticampus.com/backend
+      BACKEND_CURRENT: /var/www/gdd.srishticampus.com/backend/current
+      FRONTEND_HTML: /var/www/gdd.srishticampus.com/html
+      # NOTE: Host address for MongoDB is now exposed via the .env file
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # --- 1. Combined Setup (Frontend, Backend, and Persistent Directories) ---
+      
+      - name: Setup Server Directories and Permissions
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          script: |
+            # Create all necessary directories (html, current code, backups, uploads)
+            # NOTE: Removed mongo_backups directory as we no longer manage the DB
+            sudo mkdir -p ${{ env.FRONTEND_HTML }} ${{ env.BACKEND_CURRENT }} ${{ env.BACKEND_BASE }}/uploads ${{ env.BACKEND_BASE }}/backups
+            sudo chown -R $USER:$USER ${{ env.SERVER_BASE_PATH }}
+            sudo chmod -R 755 ${{ env.SERVER_BASE_PATH }}
+            echo "All deployment directories ready."
+            
+            # Clean up the old code directory before copying the new one
+            rm -rf ${{ env.BACKEND_CURRENT }}/* || true
+            
+      - name: Create Backup of Current Deployment
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          script: |
+            cd ${{ env.BACKEND_BASE }}
+            TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+            # Check if a current deployment exists (i.e., not the very first deploy)
+            if [ -d "current" ] && [ "$(ls -A current/ 2>/dev/null)" ]; then
+              echo "Creating backup of current deployment..."
+              # NOTE: Removed uploads/ and mongo_backups/ from the tar command
+              tar -czf backups/backup_$TIMESTAMP.tar.gz current/ .env 2>/dev/null || true
+              echo "Code/Env Backup created: backups/backup_$TIMESTAMP.tar.gz"
+              
+              # NOTE: MongoDB backup step removed as we rely on the host's existing service
+              echo "Skipping internal MongoDB backup."
+            else
+              echo "No existing deployment found, skipping backup."
+            fi
+
+      # --- 2. Frontend Deployment (Static Assets) ---
+      
+      - name: Build Frontend Production Assets (Docker)
+        run: |
+          # Write API URL to VITE_BACKEND
+          echo "VITE_BACKEND=${{ secrets.VITE_GDG_API_URL }}" > FrontendDemo/.env.production
+          
+          # Build the frontend image
+          docker build -t gdd-frontend-builder -f FrontendDemo/Dockerfile ./FrontendDemo
+          
+          # Extract the built 'dist' directory
+          docker create --name temp_gdd_frontend gdd-frontend-builder
+          docker cp temp_gdd_frontend:/app/dist ./dist_frontend
+          docker rm temp_gdd_frontend
+          
+      - name: Copy Frontend Assets to Server
+        uses: appleboy/scp-action@v0.1.4
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          source: "dist_frontend/"
+          target: "${{ env.FRONTEND_HTML }}/"
+          strip_components: 1
+          overwrite: true
+          
+      # --- 3. Backend Deployment (Docker Compose with Rollback) ---
+
+      - name: Copy Backend Code and Compose Files to Server
+        uses: appleboy/scp-action@v0.1.4
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          # Copy the contents of the BackendDemo folder directly into the target.
+          source: "BackendDemo/"
+          target: "${{ env.BACKEND_CURRENT }}/"
+          overwrite: true
+          strip_components: 1 # FIX: Strip the 'BackendDemo/' path component
+          
+      - name: Deploy with Docker Compose (and Rollback)
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          script: |
+            BACKEND_BASE_DIR="${{ env.BACKEND_BASE }}"
+            DEPLOY_DIR="${{ env.BACKEND_CURRENT }}"
+            
+            cd $DEPLOY_DIR # Change into the target directory (where the files should be)
+            
+            # ** NEW: Rename the copied docker-compose.yml to the expected production name **
+            mv docker-compose.yml ${{ env.DOCKER_COMPOSE_FILE }} || true
+            
+            # Create .env file with secrets
+            cat > .env <<EOF
+            # FIX: MONGO_URI now points to the host's external service at 27017, using correct syntax
+            MONGO_URI=mongodb://host.docker.internal:27017/demoproject
+            CORS_ORIGIN=http://gdd.srishticampus.com
+            NODE_ENV=production
+            PORT=3000 # CRITICAL FIX: Explicitly set PORT for Node.js to ensure it listens on 3000 for the health check
+            JWT_SECRET=${{ secrets.GDG_JWT_SECRET }}
+            EOF
+            chmod 600 .env
+            
+            # ** FIX: Forcefully remove existing containers by their known names to resolve Conflict error **
+            docker rm -f gdd_backend_prod 2>/dev/null || true
+            
+            # Stop and remove existing containers, using the new production file name
+            docker compose -f ${{ env.DOCKER_COMPOSE_FILE }} down || true
+            
+            # Build and start containers
+            if docker compose -f ${{ env.DOCKER_COMPOSE_FILE }} up -d --build; then
+              
+              echo "Starting GDD Backend and waiting for health check..."
+
+              # --- Backend Health Check ---
+              STATUS="starting"
+              for i in {1..24}; do # 24 checks * 5 seconds = 2 minutes timeout
+                STATUS=$(docker inspect --format='{{.State.Health.Status}}' gdd_backend_prod 2>/dev/null || echo "starting")
+                if [ "$STATUS" = "healthy" ]; then
+                  echo "gdd_backend_prod is healthy."
+                  break
+                fi
+                echo "Waiting... Status: $STATUS"
+                sleep 5
+              done
+              # --- End Health Check ---
+              
+              if [ "$STATUS" != "healthy" ]; then
+                echo "::error::GDD Backend failed to become healthy within the timeout. Initiating rollback."
+                
+                # --- NEW: Print Container Logs for Debugging ---
+                echo "--- GDD Backend Container Logs (gdd_backend_prod) ---"
+                docker logs gdd_backend_prod 2>/dev/null || echo "Could not retrieve container logs."
+                echo "-----------------------------------------------------"
+                
+                # --- ROLLBACK PROCEDURE (Code/Env Only) ---
+                
+                # FIX: Run down command from the deployment directory
+                cd $DEPLOY_DIR
+                docker compose -f ${{ env.DOCKER_COMPOSE_FILE }} down || true 
+                
+                # Change to base directory for backups and file operations
+                cd $BACKEND_BASE_DIR 
+                
+                LATEST_CODE_BACKUP=$(ls -t backups/ | grep -E '^backup_.*\.tar\.gz$' | head -1)
+                
+                if [ -n "$LATEST_CODE_BACKUP" ]; then
+                  echo "Restoring code/env from backup: $LATEST_CODE_BACKUP"
+                  rm -rf current/* || true # Clean out failed deployment code
+                  # NOTE: The tar extract command handles current/ and .env
+                  tar -xzf backups/$LATEST_CODE_BACKUP -C .
+                  
+                  # NOTE: Removed MongoDB restore logic
+                  echo "Skipping MongoDB restore as the database is external."
+                  
+                  # Restart the full service using the restored code/env
+                  # FIX: Change back to the correct deployment directory before up
+                  cd $DEPLOY_DIR 
+                  docker compose -f ${{ env.DOCKER_COMPOSE_FILE }} up -d --build
+                  
+                  # Final check for rollback success
+                  echo "Verifying rollback success..."
+                  if docker inspect --format='{{.State.Health.Status}}' gdd_backend_prod 2>/dev/null | grep -q "healthy"; then
+                    echo "Rollback completed and verified successfully."
+                    exit 0 # Exit with success code after successful rollback
+                  else
+                    echo "::error::Rollback failed to restore service health. Manual intervention required."
+                    echo "--- Rollback Failure Debug Logs (gdd_backend_prod) ---"
+                    docker logs gdd_backend_prod 2>/dev/null || true
+                    echo "------------------------------------------------------"
+                    exit 1 # Exit with failure code
+                  fi
+                else
+                  echo "::error::No backup available for rollback."
+                  exit 1 # Exit with failure code
+                fi
+              else
+                # Deployment was successful (health check passed)
+                echo "Deployment successfully verified."
+
+                # --- CLEANUP OLD BACKUPS (Keep only 5 newest) ---
+                cd $BACKEND_BASE_DIR/backups
+                ls -t | tail -n +6 | xargs rm -f -- 2>/dev/null || true
+                echo "Cleaned up old code backups (keeping 5 newest)."
+                
+                # Final verification output
+                cd $DEPLOY_DIR # Change to the current directory for verification output
+                echo "Deployment verification:"
+                # Updated filter to show only gdd_backend_prod
+                docker ps -a --filter "name=gdd_backend_prod" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+              fi
+            else
+              echo "::error::Container startup failed."
+              exit 1
+            fi
