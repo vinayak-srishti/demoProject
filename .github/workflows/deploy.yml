@@ -19,6 +19,7 @@ jobs:
       BACKEND_BASE: /var/www/gdd.srishticampus.com/backend
       BACKEND_CURRENT: /var/www/gdd.srishticampus.com/backend/current
       FRONTEND_HTML: /var/www/gdd.srishticampus.com/html
+      # NOTE: Host address for MongoDB is now exposed via the .env file
 
     steps:
       - name: Checkout repository
@@ -33,8 +34,9 @@ jobs:
           username: ${{ secrets.SERVER_USERNAME }}
           password: ${{ secrets.SERVER_PASSWORD }}
           script: |
-            # Create all necessary directories (html, current code, backups, mongo backups)
-            sudo mkdir -p ${{ env.FRONTEND_HTML }} ${{ env.BACKEND_CURRENT }} ${{ env.BACKEND_BASE }}/uploads ${{ env.BACKEND_BASE }}/backups ${{ env.BACKEND_BASE }}/mongo_backups
+            # Create all necessary directories (html, current code, backups, uploads)
+            # NOTE: Removed mongo_backups directory as we no longer manage the DB
+            sudo mkdir -p ${{ env.FRONTEND_HTML }} ${{ env.BACKEND_CURRENT }} ${{ env.BACKEND_BASE }}/uploads ${{ env.BACKEND_BASE }}/backups
             sudo chown -R $USER:$USER ${{ env.SERVER_BASE_PATH }}
             sudo chmod -R 755 ${{ env.SERVER_BASE_PATH }}
             echo "All deployment directories ready."
@@ -54,17 +56,12 @@ jobs:
             # Check if a current deployment exists (i.e., not the very first deploy)
             if [ -d "current" ] && [ "$(ls -A current/ 2>/dev/null)" ]; then
               echo "Creating backup of current deployment..."
-              tar -czf backups/backup_$TIMESTAMP.tar.gz current/ uploads/ .env 2>/dev/null || true
+              # NOTE: Removed uploads/ and mongo_backups/ from the tar command
+              tar -czf backups/backup_$TIMESTAMP.tar.gz current/ .env 2>/dev/null || true
               echo "Code/Env Backup created: backups/backup_$TIMESTAMP.tar.gz"
               
-              # Backup MongoDB (gdd_mongo container, 'demoproject' db)
-              if docker ps --format '{{.Names}}' | grep -q gdd_mongo_prod; then # Using gdd_mongo_prod container name
-                echo "Creating MongoDB backup..."
-                docker exec gdd_mongo_prod mongodump --archive --gzip --db demoproject > mongo_backups/mongo_backup_$TIMESTAMP.gz
-                echo "MongoDB backup created: mongo_backups/mongo_backup_$TIMESTAMP.gz"
-              else
-                echo "gdd_mongo_prod container not running, skipping database backup."
-              fi
+              # NOTE: MongoDB backup step removed as we rely on the host's existing service
+              echo "Skipping internal MongoDB backup."
             else
               echo "No existing deployment found, skipping backup."
             fi
@@ -118,16 +115,16 @@ jobs:
           script: |
             BACKEND_BASE_DIR="${{ env.BACKEND_BASE }}"
             DEPLOY_DIR="${{ env.BACKEND_CURRENT }}"
-            # CODE_DIR="$DEPLOY_DIR/BackendDemo" # REMOVED: Files are now directly in $DEPLOY_DIR
             
-            cd $DEPLOY_DIR # FIX: Change into the target directory (where the files should be)
+            cd $DEPLOY_DIR # Change into the target directory (where the files should be)
             
             # ** NEW: Rename the copied docker-compose.yml to the expected production name **
             mv docker-compose.yml ${{ env.DOCKER_COMPOSE_FILE }} || true
             
             # Create .env file with secrets
             cat > .env <<EOF
-            MONGO_URI=mongodb://mongo:27017/demoproject
+            # FIX: MONGO_URI now points to the host's external service at 27017
+            MONGO_URI=mongodb://host.docker.internal:27017/demoproject
             CORS_ORIGIN=http://gdd.srishticampus.com
             NODE_ENV=production
             JWT_SECRET=${{ secrets.GDG_JWT_SECRET }}
@@ -135,16 +132,20 @@ jobs:
             chmod 600 .env
             
             # ** FIX: Forcefully remove existing containers by their known names to resolve Conflict error **
-            docker rm -f gdd_mongo_prod gdd_backend_prod 2>/dev/null || true
+            # NOTE: Removed mongo_prod from cleanup
+            docker rm -f gdd_backend_prod 2>/dev/null || true
             
             # Stop and remove existing containers, using the new production file name
             docker compose -f ${{ env.DOCKER_COMPOSE_FILE }} down || true
             
             # Build and start containers
             if docker compose -f ${{ env.DOCKER_COMPOSE_FILE }} up -d --build; then
-              echo "Containers started successfully. Waiting for health check..."
               
-              # Wait for gdd_backend_prod health status
+              # NOTE: Removed MongoDB startup wait, proceeding directly to backend health check
+              echo "Starting GDD Backend and waiting for health check..."
+
+              # --- Backend Health Check ---
+              STATUS="starting"
               for i in {1..24}; do # 24 checks * 5 seconds = 2 minutes timeout
                 STATUS=$(docker inspect --format='{{.State.Health.Status}}' gdd_backend_prod 2>/dev/null || echo "starting")
                 if [ "$STATUS" = "healthy" ]; then
@@ -154,36 +155,29 @@ jobs:
                 echo "Waiting... Status: $STATUS"
                 sleep 5
               done
+              # --- End Health Check ---
               
               if [ "$STATUS" != "healthy" ]; then
                 echo "::error::GDD Backend failed to become healthy within the timeout. Initiating rollback."
                 
-                # --- ROLLBACK PROCEDURE ---
+                # --- ROLLBACK PROCEDURE (Code/Env Only) ---
                 cd $BACKEND_BASE_DIR # Change to the base directory for backups
-                # Bring down failed containers (using the full path to the new prod file name)
-                docker compose -f current/${{ env.DOCKER_COMPOSE_FILE }} down || true # FIX: Removed BackendDemo/ from path
+                # Bring down failed containers 
+                docker compose -f current/${{ env.DOCKER_COMPOSE_FILE }} down || true 
                 
                 LATEST_CODE_BACKUP=$(ls -t backups/ | grep -E '^backup_.*\.tar\.gz$' | head -1)
-                LATEST_MONGO_BACKUP=$(ls -t mongo_backups/ | grep -E '^mongo_backup_.*\.gz$' | head -1)
                 
                 if [ -n "$LATEST_CODE_BACKUP" ]; then
                   echo "Restoring code/env from backup: $LATEST_CODE_BACKUP"
                   rm -rf current/* || true # Clean out failed deployment code
+                  # NOTE: The tar extract command handles current/ and .env
                   tar -xzf backups/$LATEST_CODE_BACKUP -C .
                   
-                  if [ -n "$LATEST_MONGO_BACKUP" ]; then
-                    echo "Restoring MongoDB from backup: $LATEST_MONGO_BACKUP"
-                    # Start only the mongo container to restore data
-                    cd $DEPLOY_DIR # FIX: Change to the current directory for docker-compose file
-                    docker compose -f ${{ env.DOCKER_COMPOSE_FILE }} up -d gdd_mongo
-                    sleep 10 # Give mongo time to start
-                    # Restore data to 'demoproject' database
-                    docker exec -i gdd_mongo_prod mongorestore --archive --gzip --drop --db demoproject < $BACKEND_BASE_DIR/mongo_backups/$LATEST_MONGO_BACKUP
-                    echo "MongoDB restore complete."
-                  fi
+                  # NOTE: Removed MongoDB restore logic
+                  echo "Skipping MongoDB restore as the database is external."
                   
                   # Restart the full service using the restored code/env
-                  cd $DEPLOY_DIR # FIX: Change back to the current directory for docker-compose file
+                  cd $DEPLOY_DIR # Change back to the current directory for docker-compose file
                   docker compose -f ${{ env.DOCKER_COMPOSE_FILE }} up -d --build
                   
                   # Final check for rollback success
@@ -208,14 +202,13 @@ jobs:
                 ls -t | tail -n +6 | xargs rm -f -- 2>/dev/null || true
                 echo "Cleaned up old code backups (keeping 5 newest)."
                 
-                cd $BACKEND_BASE_DIR/mongo_backups
-                ls -t | tail -n +6 | xargs rm -f -- 2>/dev/null || true
-                echo "Cleaned up old Mongo backups (keeping 5 newest)."
+                # NOTE: Removed Mongo backup cleanup
                 
                 # Final verification output
-                cd $DEPLOY_DIR # FIX: Change to the current directory for verification output
+                cd $DEPLOY_DIR # Change to the current directory for verification output
                 echo "Deployment verification:"
-                docker ps -a --filter "name=gdd_" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+                # Updated filter to show only gdd_backend_prod
+                docker ps -a --filter "name=gdd_backend_prod" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
               fi
             else
               echo "::error::Container startup failed."
