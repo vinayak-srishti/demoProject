@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import "./UserReg.css";
 import img from "../../assets/images/clientReg.png";
 import { Link } from "react-router-dom";
-import { registerUser } from "../../services/UserService"; 
+import { registerUser } from "../../services/userService.js" 
 
 function UserReg() {
   const [formData, setFormData] = useState({
