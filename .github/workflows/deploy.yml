@@ -120,6 +120,10 @@ jobs:
             if docker compose -f ${{ env.DOCKER_COMPOSE_FILE }} up -d --build; then
               echo "Containers started successfully"
               
+              # ADDED: Wait for 10 seconds to allow MongoDB to fully initialize
+              echo "Waiting 10 seconds for MongoDB to initialize..."
+              sleep 10
+              
               # --- Simplified Health Check for GDD Backend ---
               echo "Waiting for gdd_backend_prod to become healthy..."
               for i in {1..24}; do # 24 checks * 5 seconds = 2 minutes timeout
