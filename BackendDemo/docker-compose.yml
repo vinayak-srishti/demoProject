@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # --- Backend Service (Node.js/Express) ---
   gdd_backend:
@@ -37,8 +35,6 @@ services:
     volumes:
       # Persistent storage for MongoDB data
       - mongo_data:/data/db
-    # Robust command to remove all stale lock and session files before starting
-    command: ["/bin/bash", "-c", "rm -f /data/db/mongod.lock /data/db/WiredTiger.lock /data/db/WiredTiger.session /data/db/WiredTiger.turtle || true && exec mongod"]
     healthcheck:
       # Uses mongosh for a more robust, official MongoDB health check
       test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.runCommand({ ping: 1 }).ok ? 0 : 1)"]
