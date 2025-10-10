@@ -1,4 +1,4 @@
-name: Deploy GDG Project (Production)
+name: Deploy GDD Project (Production)
 
 # This workflow runs when changes are pushed to the 'deploy' branch
 on:
@@ -42,12 +42,12 @@ jobs:
           echo "VITE_BACKEND=${{ secrets.VITE_GDG_API_URL }}" > FrontendDemo/.env.production
           
           # 2. Build the frontend image using the Dockerfile in FrontendDemo
-          docker build -t gdg-frontend-builder -f FrontendDemo/Dockerfile ./FrontendDemo
+          docker build -t gdd-frontend-builder -f FrontendDemo/Dockerfile ./FrontendDemo
           
           # 3. Extract the built 'dist' directory
-          docker create --name temp_gdg_frontend gdg-frontend-builder
-          docker cp temp_gdg_frontend:/app/dist ./dist_frontend
-          docker rm temp_gdg_frontend
+          docker create --name temp_gdd_frontend gdd-frontend-builder
+          docker cp temp_gdd_frontend:/app/dist ./dist_frontend
+          docker rm temp_gdd_frontend
         
       - name: Clean up and Copy Frontend Assets to Server
         uses: appleboy/scp-action@v0.1.4
@@ -106,7 +106,7 @@ jobs:
             
             # Create .env file for the running containers (using the new domain)
             cat > .env <<EOF
-            MONGO_URI=mongodb://gdg_mongo:27018/demoproject
+            MONGO_URI=mongodb://gdd_mongo:27018/demoproject
             CORS_ORIGIN=http://gdd.srishticampus.com
             NODE_ENV=production
             # Add any other required backend environment variables here:
@@ -121,12 +121,12 @@ jobs:
             if docker compose -f ${{ env.DOCKER_COMPOSE_FILE }} up -d --build; then
               echo "Containers started successfully"
               
-              # --- Simplified Health Check for GDG Backend ---
-              echo "Waiting for gdg_backend_prod to become healthy..."
+              # --- Simplified Health Check for GDD Backend ---
+              echo "Waiting for gdd_backend_prod to become healthy..."
               for i in {1..24}; do # 24 checks * 5 seconds = 2 minutes timeout
-                STATUS=$(docker inspect --format='{{.State.Health.Status}}' gdg_backend_prod 2>/dev/null || echo "starting")
+                STATUS=$(docker inspect --format='{{.State.Health.Status}}' gdd_backend_prod 2>/dev/null || echo "starting")
                 if [ "$STATUS" = "healthy" ]; then
-                  echo "gdg_backend_prod is healthy."
+                  echo "gdd_backend_prod is healthy."
                   break
                 fi
                 echo "Waiting... Status: $STATUS"
@@ -134,12 +134,12 @@ jobs:
               done
               
               if [ "$STATUS" != "healthy" ]; then
-                echo "::error::GDG Backend failed to become healthy within the timeout."
+                echo "::error::GDD Backend failed to become healthy within the timeout."
                 exit 1
               fi
 
               echo "Deployment verification:"
-              docker ps -a --filter "name=gdg_" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+              docker ps -a --filter "name=gdd_" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
               
             else
               echo "::error::Container startup failed."
