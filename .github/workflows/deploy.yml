@@ -119,10 +119,9 @@ jobs:
             DEPLOY_DIR="${{ env.BACKEND_CURRENT }}"
             CODE_DIR="$DEPLOY_DIR/BackendDemo" # The actual location of the Dockerfile/compose file
             
-            cd $CODE_DIR # **CHANGE: Change into the nested BackendDemo directory**
+            cd $CODE_DIR # Change into the nested BackendDemo directory
             
             # ** NEW: Rename the copied docker-compose.yml to the expected production name **
-            # This ensures we use the correct file from BackendDemo/ and not a lingering root file.
             mv docker-compose.yml ${{ env.DOCKER_COMPOSE_FILE }} || true
             
             # Create .env file with secrets
@@ -133,6 +132,9 @@ jobs:
             JWT_SECRET=${{ secrets.GDG_JWT_SECRET }}
             EOF
             chmod 600 .env
+            
+            # ** FIX: Forcefully remove existing containers by their known names to resolve Conflict error **
+            docker rm -f gdd_mongo_prod gdd_backend_prod 2>/dev/null || true
             
             # Stop and remove existing containers, using the new production file name
             docker compose -f ${{ env.DOCKER_COMPOSE_FILE }} down || true
@@ -158,7 +160,6 @@ jobs:
                 # --- ROLLBACK PROCEDURE ---
                 cd $BACKEND_BASE_DIR # Change to the base directory for backups
                 # Bring down failed containers (using the full path to the new prod file name)
-                # The compose file is now under current/BackendDemo
                 docker compose -f current/BackendDemo/${{ env.DOCKER_COMPOSE_FILE }} down || true
                 
                 LATEST_CODE_BACKUP=$(ls -t backups/ | grep -E '^backup_.*\.tar\.gz$' | head -1)
