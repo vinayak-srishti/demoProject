@@ -117,8 +117,9 @@ jobs:
           script: |
             BACKEND_BASE_DIR="${{ env.BACKEND_BASE }}"
             DEPLOY_DIR="${{ env.BACKEND_CURRENT }}"
+            CODE_DIR="$DEPLOY_DIR/BackendDemo" # The actual location of the Dockerfile/compose file
             
-            cd $DEPLOY_DIR
+            cd $CODE_DIR # **CHANGE: Change into the nested BackendDemo directory**
             
             # ** NEW: Rename the copied docker-compose.yml to the expected production name **
             # This ensures we use the correct file from BackendDemo/ and not a lingering root file.
@@ -155,9 +156,10 @@ jobs:
                 echo "::error::GDD Backend failed to become healthy within the timeout. Initiating rollback."
                 
                 # --- ROLLBACK PROCEDURE ---
-                cd $BACKEND_BASE_DIR
+                cd $BACKEND_BASE_DIR # Change to the base directory for backups
                 # Bring down failed containers (using the full path to the new prod file name)
-                docker compose -f current/${{ env.DOCKER_COMPOSE_FILE }} down || true
+                # The compose file is now under current/BackendDemo
+                docker compose -f current/BackendDemo/${{ env.DOCKER_COMPOSE_FILE }} down || true
                 
                 LATEST_CODE_BACKUP=$(ls -t backups/ | grep -E '^backup_.*\.tar\.gz$' | head -1)
                 LATEST_MONGO_BACKUP=$(ls -t mongo_backups/ | grep -E '^mongo_backup_.*\.gz$' | head -1)
@@ -170,7 +172,7 @@ jobs:
                   if [ -n "$LATEST_MONGO_BACKUP" ]; then
                     echo "Restoring MongoDB from backup: $LATEST_MONGO_BACKUP"
                     # Start only the mongo container to restore data
-                    cd $DEPLOY_DIR
+                    cd $CODE_DIR # Change to the code directory for docker-compose file
                     docker compose -f ${{ env.DOCKER_COMPOSE_FILE }} up -d gdd_mongo
                     sleep 10 # Give mongo time to start
                     # Restore data to 'demoproject' database
@@ -179,7 +181,7 @@ jobs:
                   fi
                   
                   # Restart the full service using the restored code/env
-                  cd $DEPLOY_DIR
+                  cd $CODE_DIR # Change back to the code directory for docker-compose file
                   docker compose -f ${{ env.DOCKER_COMPOSE_FILE }} up -d --build
                   
                   # Final check for rollback success
@@ -209,7 +211,7 @@ jobs:
                 echo "Cleaned up old Mongo backups (keeping 5 newest)."
                 
                 # Final verification output
-                cd $DEPLOY_DIR
+                cd $CODE_DIR # Change to the code directory for verification output
                 echo "Deployment verification:"
                 docker ps -a --filter "name=gdd_" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
               fi
