@@ -2,8 +2,7 @@ services:
   # --- Backend Service (Node.js/Express) ---
   gdd_backend:
     build:
-      # Context points to the directory containing the backend Dockerfile and source
-      context: ./BackendDemo
+      context: .
       dockerfile: Dockerfile
     container_name: gdd_backend_prod
     restart: unless-stopped
