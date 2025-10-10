@@ -103,8 +103,10 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USERNAME }}
           password: ${{ secrets.SERVER_PASSWORD }}
-          # Copy BackendDemo contents AND the root docker-compose.yml file
-          source: "BackendDemo/,${{ env.DOCKER_COMPOSE_FILE }}"
+          # Copy ONLY the contents of the BackendDemo folder.
+          # This assumes the correct, production-ready docker-compose.yml 
+          # is located inside BackendDemo/.
+          source: "BackendDemo/"
           target: "${{ env.BACKEND_CURRENT }}/"
           overwrite: true
           
