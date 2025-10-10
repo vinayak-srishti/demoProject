@@ -124,7 +124,7 @@ jobs:
             # Create .env file with secrets
             cat > .env <<EOF
             # FIX: MONGO_URI now points to the host's external service at 27017
-            MONGO_URI=mongodb://host.docker.internal:27017/demoproject
+            MONGO_URI=mongodb://mongo:27017//demoproject
             CORS_ORIGIN=http://gdd.srishticampus.com
             NODE_ENV=production
             JWT_SECRET=${{ secrets.GDG_JWT_SECRET }}
