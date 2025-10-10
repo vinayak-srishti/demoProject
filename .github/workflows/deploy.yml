@@ -12,7 +12,7 @@ jobs:
     
     # Define environment variables used during the Docker build steps
     env:
-      # Assuming your docker-compose file is named this in the BackendDemo directory
+      # Assuming your docker-compose file is named this in the repository root (./)
       DOCKER_COMPOSE_FILE: docker-compose.yml 
       # Base path for deployment on the server
       SERVER_BASE_PATH: /var/www/gdd.srishticampus.com
@@ -42,13 +42,12 @@ jobs:
           echo "VITE_BACKEND=${{ secrets.VITE_GDG_API_URL }}" > FrontendDemo/.env.production
           
           # 2. Build the frontend image using the Dockerfile in FrontendDemo
-          docker build -t gdg-frontend-builder -f FrontendDemo/Dockerfile ./FrontendDemo
+          docker build -t gdg-frontend-builder -f FrontendDemo/Dockerfile.build ./FrontendDemo
           
           # 3. Extract the built 'dist' directory
           docker create --name temp_gdg_frontend gdg-frontend-builder
           docker cp temp_gdg_frontend:/app/dist ./dist_frontend
           docker rm temp_gdg_frontend
-        # This creates a local directory called 'dist_frontend' with the compiled assets
         
       - name: Clean up and Copy Frontend Assets to Server
         uses: appleboy/scp-action@v0.1.4
@@ -71,7 +70,9 @@ jobs:
           password: ${{ secrets.SERVER_PASSWORD }}
           script: |
             BACKEND_PATH="${{ env.SERVER_BASE_PATH }}/backend"
-            sudo mkdir -p $BACKEND_PATH/current
+            DEPLOY_DIR="$BACKEND_PATH/current"
+            
+            sudo mkdir -p $DEPLOY_DIR
             # Setup folders for data persistence (assuming your backend uses these paths)
             sudo mkdir -p $BACKEND_PATH/uploads
             sudo mkdir -p $BACKEND_PATH/backups
@@ -80,18 +81,29 @@ jobs:
             echo "Backend directory $BACKEND_PATH ready."
             
             # Clean up the old code directory before copy
-            rm -rf $BACKEND_PATH/current/* || true
+            rm -rf $DEPLOY_DIR/* || true
 
-      - name: Copy Backend Files and Docker Compose to Server
+      - name: Copy Backend Code to Server
         uses: appleboy/scp-action@v0.1.4
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USERNAME }}
           password: ${{ secrets.SERVER_PASSWORD }}
-          # Copy the entire BackendDemo directory contents to the server
+          # Copy the contents of the BackendDemo directory (code files)
           source: "BackendDemo/"
           target: "${{ env.SERVER_BASE_PATH }}/backend/current/"
-          strip_components: 1 # Remove the 'BackendDemo/' path component
+          strip_components: 1 
+          overwrite: true
+
+      - name: Copy Docker Compose File to Server
+        uses: appleboy/scp-action@v0.1.4
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          # COPY THE YAML FILE from the repository root to the deployment folder
+          source: "${{ env.DOCKER_COMPOSE_FILE }}"
+          target: "${{ env.SERVER_BASE_PATH }}/backend/current/"
           overwrite: true
 
       - name: Deploy with Docker Compose
@@ -114,6 +126,7 @@ jobs:
             EOF
             
             # Stop and remove existing containers (using the file name defined in env)
+            # This line will now find the docker-compose.yml file:
             docker compose -f ${{ env.DOCKER_COMPOSE_FILE }} down || true
             
             # Build and start containers
