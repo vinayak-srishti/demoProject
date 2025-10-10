@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   # --- Backend Service (Node.js/Express) ---
   gdd_backend:
@@ -8,11 +10,8 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
-    environment:
-      # MONGO_URI uses the service name 'gdg_mongo' for internal networking
-      - MONGO_URI=mongodb://gdg_mongo:27018/demoproject
-      - CORS_ORIGIN=${CORS_ORIGIN}
-      # Other environment variables (like NODE_ENV) are provided by the .env file
+    # Uses the .env file created by the deployment script
+    env_file: .env 
     # Ensure backend waits for the database to be reported as healthy
     depends_on:
       gdd_mongo:
@@ -32,14 +31,16 @@ services:
     container_name: gdd_mongo_prod
     restart: unless-stopped
     ports:
-      # Expose internal Mongo port 27017 to host port 27018 (used by the backend)
-      - "27018:27017"
+      # Expose internal Mongo port 27017 to host port 27018 (avoids conflict).
+      # Backend connects internally using 'gdd_mongo:27017'.
+      - "27018:27017" 
     volumes:
       # Persistent storage for MongoDB data
       - mongo_data:/data/db
+    # Robust command to remove all stale lock and session files before starting
     command: ["/bin/bash", "-c", "rm -f /data/db/mongod.lock /data/db/WiredTiger.lock /data/db/WiredTiger.session /data/db/WiredTiger.turtle || true && exec mongod"]
     healthcheck:
-      # FIX: Added "CMD" prefix to satisfy Docker Compose healthcheck syntax.
+      # Uses mongosh for a more robust, official MongoDB health check
       test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.runCommand({ ping: 1 }).ok ? 0 : 1)"]
       interval: 10s
       timeout: 5s
@@ -57,3 +58,4 @@ volumes:
 networks:
   gdd_network:
     driver: bridge
+    name: current_gdd_network
