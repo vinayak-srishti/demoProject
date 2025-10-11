@@ -10,7 +10,7 @@ function Home() {
         <UserNavbar/>
         <Banner/>
         <Services/>
-        <AboutUs/>
+        {/* <AboutUs/> */}
     </div>
   )
 }
