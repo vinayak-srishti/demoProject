@@ -1,17 +1,15 @@
-import React from 'react'
-import './Banner.css'
+import React from 'react';
+import './Banner.css';
 
 function Banner() {
-    return (
-        <div>
-            <div className='landingcarimage' />
-            <div className='landingcarText'>
-                <p>The law is a weapon <br /> if you know how to use it.</p>
-            </div>
-            <div className='container'>
-            </div>
-        </div>
-    )
+  return (
+    <div className="banner">
+      <div className="landingcarimage" />
+      <div className="landingcarText">
+        <p>The law is a weapon <br /> if you know how to use it.</p>
+      </div>
+    </div>
+  );
 }
 
-export default Banner
+export default Banner;
